@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    /* NULL оставляет порядок, в котором записи хранятся в каталоге. */
+    /* null оставляет порядок, в котором записи хранятся в каталоге. */
     count = scandir(directory, &entries, skip_hidden, NULL);
     if (count == -1) {
         fprintf(stderr, "Не удалось прочитать каталог %s: %s\n", directory,
