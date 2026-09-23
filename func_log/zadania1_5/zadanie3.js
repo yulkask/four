@@ -1,5 +1,5 @@
 // нефункциональный
-/*
+
 function histogramImperative(numbers) {
     const lines = [];                 // изменяемое состояние
     for (let i = 0; i < numbers.length; i++) {   // явный счётчик
@@ -14,7 +14,7 @@ function histogramImperative(numbers) {
 
 const numbers = [10, 15, 7, 9, 1, 3];
 histogramImperative(numbers).forEach(line => console.log(line));
-*/
+
 
 // функциональный
 const histogramFunctional = numbers =>
