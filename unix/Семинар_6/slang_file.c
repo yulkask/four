@@ -1,6 +1,3 @@
-// Просмотр текстового файла с помощью S-Lang.
-// Основа — пример slang.c, но строки загружаются из файла.
-// compile with -lslang
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>

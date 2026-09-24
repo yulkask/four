@@ -1,11 +1,5 @@
-/*
- * Чтение строк из текстового файла, выделение слов регулярным
- * выражением \b\w+\b и вывод их через точку.
- *
- * Использование: ./words файл      (без аргумента читается stdin)
- */
 #define _POSIX_C_SOURCE 200809L
-#define _DARWIN_C_SOURCE   /* иначе macOS скрывает REG_ENHANCED */
+#define _DARWIN_C_SOURCE   
 #include <locale.h>
 #include <regex.h>
 #include <stdio.h>
@@ -13,14 +7,14 @@
 #include <string.h>
 
 /* На macOS \w и \b работают только с флагом REG_ENHANCED,
-   в glibc (Linux) они поддерживаются и так. */
+   в glibc они поддерживаются и так. */
 #ifndef REG_ENHANCED
 #define REG_ENHANCED 0
 #endif
 
 #define WORD_RE "\\b\\w+\\b"
 
-/* Печатает слова строки через точку, возвращает их количество */
+//Печатает слова строки через точку, возвращает их количество 
 static int print_words(const regex_t *preg, const char *line)
 {
     regmatch_t pm;
@@ -35,7 +29,7 @@ static int print_words(const regex_t *preg, const char *line)
         count++;
 
         p += pm.rm_eo;
-        /* Поиск продолжается с середины строки: это уже не её начало */
+        //Поиск продолжается с середины строки: это уже не её начало 
         eflags = REG_NOTBOL;
     }
     if (count > 0)
@@ -51,7 +45,7 @@ int main(int argc, char *argv[])
     size_t cap = 0;
     int rc, total = 0;
 
-    /* Локаль из окружения, чтобы \w распознавал кириллицу в UTF-8 */
+    // Локаль из окружения, чтобы \w распознавал кириллицу в UTF-8
     setlocale(LC_ALL, "");
 
     if (argc > 2) {
