@@ -6,8 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* На macOS \w и \b работают только с флагом REG_ENHANCED,
-   в glibc они поддерживаются и так. */
 #ifndef REG_ENHANCED
 #define REG_ENHANCED 0
 #endif
@@ -45,7 +43,6 @@ int main(int argc, char *argv[])
     size_t cap = 0;
     int rc, total = 0;
 
-    // Локаль из окружения, чтобы \w распознавал кириллицу в UTF-8
     setlocale(LC_ALL, "");
 
     if (argc > 2) {
