@@ -86,18 +86,30 @@ def plot_ecg(ax, r, scale, leads=("I", "II", "III"), offset=1.6, t0=0):
     ax.set_xlim(r["t"][0] - t0, r["t"][-1] - t0)
 
 
-def intervals(h, r, beat_start=0.0):
-    """Интервалы ЭКГ по картам активации/реполяризации (одно сокращение)."""
-    a, rep, t = r["act"], r["rep"], h.type
+def intervals(h, r, last=False):
+    """Интервалы ЭКГ по картам активации/реполяризации.
+
+    last=False - первое сокращение, last=True - последнее (установившийся ритм).
+    """
+    a = r["act_last"] if last else r["act"]
+    rep = r["rep_last"] if last else r["rep"]
+    t = h.type
     atr = a[t == ATRIA]
-    ven = a[np.isin(t, (VENT, BORDER))]
-    ven_rep = rep[np.isin(t, (VENT, BORDER))]
+    vm = np.isin(t, (VENT, BORDER))
     return {
         "P": np.nanmax(atr) - np.nanmin(atr),
-        "PR": np.nanmin(ven) - np.nanmin(atr),
-        "QRS": np.nanmax(ven) - np.nanmin(ven),
-        "QT": np.nanmax(ven_rep) - np.nanmin(ven),
+        "PR": np.nanmin(a[vm]) - np.nanmin(atr),
+        "QRS": np.nanmax(a[vm]) - np.nanmin(a[vm]),
+        "QT": np.nanmax(rep[vm]) - np.nanmin(a[vm]),
     }
+
+
+def beats(h, r, types=(VENT,)):
+    """Моменты, когда больше половины клеток данной ткани возбуждены."""
+    m = np.isin(h.type, types)
+    frac = (r["snaps"][:, m] > 0.5).mean(axis=1)
+    t = r["snap_t"]
+    return t[1:][(frac[1:] > 0.5) & (frac[:-1] <= 0.5)]
 
 
 def ecg_qrs_width(t, sig, t_from, t_to, frac=0.05):
@@ -156,14 +168,13 @@ def snapshots(h, r, times, fname, suptitle):
     plt.close(fig)
 
 
-# ---------------------------------------------------------------------------
-# 1. Норма: синусовый ритм 75 уд/мин
-# ---------------------------------------------------------------------------
+# 1. Норма: синусовый ритм 60 уд/мин
+
 def scenario_normal():
-    log("\n=== 1. Нормальный синусовый ритм, 75 уд/мин ===")
+    log("\n=== 1. Нормальный синусовый ритм, 60 уд/мин ===")
     h = Heart()
     t0 = time.time()
-    r = run(h, 2400, bpm=75)
+    r = run(h, 3000, bpm=60)
     log(f"время счёта: {time.time() - t0:.1f} с, клеток ткани: {(h.D > 0).sum()}")
     scale = np.abs(r["leads"]["II"]).max()   # нормировка: max|II| = 1
 
@@ -209,9 +220,9 @@ def scenario_normal():
     # --- ЭКГ ---
     fig, ax = plt.subplots(2, 1, figsize=(13, 7.5), gridspec_kw={"height_ratios": [2.2, 1]})
     plot_ecg(ax[0], r, scale)
-    ax[0].set_title("Псевдо-ЭКГ, стандартные отведения (норма, 75 уд/мин)")
+    ax[0].set_title("Псевдо-ЭКГ, стандартные отведения (норма, 60 уд/мин)")
     tt, ii = r["t"], r["leads"]["II"] / scale
-    b = (tt < 800)
+    b = (tt < 1000)
     iv = intervals(h, r)
     ax[1].plot(tt[b], ii[b], color=LEAD_COLORS["II"], lw=1.6)
     for x0, x1, lab, yy in [(20, 20 + iv["P"], "P", 0.45),
@@ -228,10 +239,14 @@ def scenario_normal():
     fig.savefig(os.path.join(OUT, "04_normal_ecg.png"), dpi=110)
     plt.close(fig)
 
-    log("Интервалы (по картам активации/реполяризации, 1-й цикл):")
-    for k, v in iv.items():
-        log(f"  {k:4s} = {v:6.1f} мс")
-    log(f"  QRS по ЭКГ (отведение II) = {ecg_qrs_width(tt, ii, 150, 380):.1f} мс")
+    il = intervals(h, r, last=True)
+    log("Интервалы по картам активации/реполяризации, мс:")
+    log(f"  {'':5s} {'1-й цикл':>9s} {'3-й цикл':>9s}")
+    for k in iv:
+        log(f"  {k:5s} {iv[k]:9.1f} {il[k]:9.1f}")
+    w3 = tt > 2000
+    log(f"  QRS по ЭКГ (отведение II): 1-й цикл {ecg_qrs_width(tt, ii, 150, 360):.1f} мс, "
+        f"3-й цикл {ecg_qrs_width(tt[w3], ii[w3], 2150, 2360):.1f} мс")
     at = r["act"]
     log(f"Активация: предсердия {np.nanmin(at[h.type == ATRIA]):.0f}-{np.nanmax(at[h.type == ATRIA]):.0f} мс, "
         f"АВ-узел {np.nanmin(at[h.type == AVN]):.0f}-{np.nanmax(at[h.type == AVN]):.0f} мс, "
@@ -241,29 +256,33 @@ def scenario_normal():
     log(f"APD50 желудочков: {np.nanmin(apd):.0f}-{np.nanmax(apd):.0f} мс; "
         f"APD50 предсердий: {np.nanmean(r['apd'][h.type == ATRIA]):.0f} мс")
     ven = np.isin(h.type, (VENT, PURK, HIS))
-    log(f"Все клетки желудочков возбуждены 3 раза: {np.all(r['n_act'][ven] == 3)}")
+    log(f"Все клетки желудочков возбуждены 3 раза (проведение 1:1): {np.all(r['n_act'][ven] == 3)}")
 
+    t0 = time.time()
     animate(h, r, "normal_beat.gif", (0, 700), scale)
+    log(f"GIF: {time.time() - t0:.0f} с")
     return scale
 
 
-# ---------------------------------------------------------------------------
 # 2. Полная АВ-блокада (III степени) с идиовентрикулярным ритмом
-# ---------------------------------------------------------------------------
+
 def scenario_avblock(scale):
     log("\n=== 2. Полная атриовентрикулярная блокада ===")
     h = Heart(av_block=True)
     # выскальзывающий водитель ритма в миокарде ЛЖ у верхушки, 35 уд/мин
-    esc = ellipse(h.X, h.Y, 8.0, 50.0, 2.0, 2.0) & (h.type == VENT)
+    esc = ellipse(h.X, h.Y, 8.0, 52.0, 3.0, 3.0) & (h.type == VENT)
     esc_times = np.arange(600.0, 4000.0, 60000.0 / 35)
     r = run(h, 4000, bpm=75, extra_stim=[(t, esc) for t in esc_times])
     ven = h.type == VENT
-    log(f"Предсердия возбуждены {r['n_act'][h.type == ATRIA].max()} раз (синусовый ритм 75/мин), "
-        f"желудочки - {r['n_act'][ven].max()} раз (выскальзывающий ритм 35/мин)")
+    ba, bv = beats(h, r, (ATRIA,)), beats(h, r)
+    log(f"Возбуждения предсердий: {np.round(ba).astype(int).tolist()} мс "
+        f"(интервал {np.mean(np.diff(ba)):.0f} мс = {60000 / np.mean(np.diff(ba)):.0f}/мин)")
+    log(f"Возбуждения желудочков: {np.round(bv).astype(int).tolist()} мс "
+        f"(интервал {np.mean(np.diff(bv)):.0f} мс = {60000 / np.mean(np.diff(bv)):.0f}/мин)")
     at = r["act"]
     log(f"Первая активация желудочков от эктопического очага: "
         f"{np.nanmin(at[ven]):.0f}-{np.nanmax(at[ven]):.0f} мс "
-        f"(QRS {np.nanmax(at[ven]) - np.nanmin(at[ven]):.0f} мс - широкий, без участия Пуркинье)")
+        f"(QRS {np.nanmax(at[ven]) - np.nanmin(at[ven]):.0f} мс; форма комплекса аномальная)")
 
     fig = plt.figure(figsize=(14, 7))
     g = fig.add_gridspec(2, 3)
@@ -277,7 +296,7 @@ def scenario_avblock(scale):
     i = np.argmin(np.abs(r["snap_t"] - 660))
     ax2.imshow(np.where(h.D > 0, to_mv(r["snaps"][i]), np.nan), cmap="inferno",
                vmin=-85, vmax=25, extent=extent(h))
-    ax2.set_title("t = 660 мс: желудочки возбуждаются\nот очага, минуя проводящую систему")
+    ax2.set_title("t = 660 мс: желудочки возбуждаются от очага;\nПуркинье - ретроградно, через PMJ")
     ax2.axis("off")
     ax3 = fig.add_subplot(g[1, :])
     tt, ii = r["t"], r["leads"]["II"] / scale
@@ -297,30 +316,26 @@ def scenario_avblock(scale):
     plt.close(fig)
 
 
-# ---------------------------------------------------------------------------
 # 3. Постинфарктный рубец + желудочковая экстрасистола
-# ---------------------------------------------------------------------------
+
 def scenario_infarct(scale):
     log("\n=== 3. Постинфарктный рубец в боковой стенке ЛЖ ===")
     hn, hi = Heart(), Heart(scar=True)
-    rn = run(hn, 800)
-    pvc = ellipse(hi.X, hi.Y, 17.0, 42.0, 1.5, 1.5) & np.isin(hi.type, (VENT, BORDER))
-    ri = run(hi, 2400, extra_stim=[(1450.0, pvc)])
+    rn = run(hn, 1000, bpm=60)
+    pvc = ellipse(hi.X, hi.Y, 20.0, 43.0, 3.0, 3.0) & np.isin(hi.type, (VENT, BORDER))
+    ri = run(hi, 3000, bpm=60, extra_stim=[(1700.0, pvc)])
 
     ivn, ivi = intervals(hn, rn), intervals(hi, ri)
     log(f"{'':6s} {'норма':>8s} {'инфаркт':>8s}")
     for k in ivn:
         log(f"{k:6s} {ivn[k]:8.1f} {ivi[k]:8.1f} мс")
-    for name, h, r in (("норма", hn, rn), ("инфаркт", hi, ri)):
-        w = r["t"] < 800
-        log(f"QRS по ЭКГ (II), {name}: "
-            f"{ecg_qrs_width(r['t'][w], r['leads']['II'][w] / scale, 150, 450):.1f} мс")
     bz = hi.type == BORDER
     log(f"Пограничная зона активируется в {np.nanmin(ri['act'][bz]):.0f}-{np.nanmax(ri['act'][bz]):.0f} мс; "
         f"последняя клетка желудочков - {ivi['PR'] + ivi['QRS'] + 20:.0f} мс")
-    n_v = ri["n_act"][hi.type == VENT]
-    log(f"За 2400 мс желудочки возбуждены {np.bincount(n_v).argmax()} раза "
-        f"(2 синусовых + экстрасистола; 3-й синусовый импульс блокирован - компенсаторная пауза)")
+    bv = beats(hi, ri)
+    log(f"Возбуждения желудочков (инфаркт + экстрасистола в 1700 мс): "
+        f"{np.round(bv).astype(int).tolist()} мс; синусовые импульсы предсердий: "
+        f"{np.round(beats(hi, ri, (ATRIA,))).astype(int).tolist()} мс")
 
     fig = plt.figure(figsize=(14, 8.5))
     g = fig.add_gridspec(2, 3, height_ratios=[1, 0.9])
@@ -339,7 +354,7 @@ def scenario_infarct(scale):
         a.images[-1].set_clim(160, vmax)
     ax2 = fig.add_subplot(g[1, :2])
     for name, r, ls in (("норма", rn, "--"), ("инфаркт", ri, "-")):
-        w = r["t"] < 800
+        w = r["t"] < 1000
         for k, lead in enumerate(("I", "II")):
             ax2.plot(r["t"][w], r["leads"][lead][w] / scale - 1.7 * k,
                      color=LEAD_COLORS[lead], ls=ls, lw=1.3,
@@ -351,8 +366,8 @@ def scenario_infarct(scale):
     ax2.grid(True, color="#f4b6b6")
     ax3 = fig.add_subplot(g[1, 2])
     ax3.plot(ri["t"], ri["leads"]["II"] / scale, color=LEAD_COLORS["II"], lw=1)
-    ax3.axvline(1450, color="k", ls=":")
-    ax3.text(1470, ax3.get_ylim()[1] * 0.85, "экстра-\nсистола", fontsize=8)
+    ax3.axvline(1700, color="k", ls=":")
+    ax3.text(1720, ax3.get_ylim()[1] * 0.85, "экстра-\nсистола", fontsize=8)
     ax3.set_title("Отведение II: экстрасистола из\nпограничной зоны и компенсаторная пауза")
     ax3.set_xlabel("время, мс")
     ax3.grid(True, color="#f4b6b6")
@@ -361,9 +376,8 @@ def scenario_infarct(scale):
     plt.close(fig)
 
 
-# ---------------------------------------------------------------------------
 # 4. Re-entry: спиральная волна (тахикардия) и её распад на фиброзе
-# ---------------------------------------------------------------------------
+
 def patchy_fibrosis(n, dx, frac, blob, seed=1):
     """Пятнистый фиброз: сглаженный гауссов шум, порог по доле frac."""
     rng = np.random.default_rng(seed)
@@ -440,7 +454,7 @@ def count_activations(t, u, t_from):
 def scenario_reentry():
     log("\n=== 4. Re-entry во фрагменте миокарда (100 x 100 мм) ===")
     res = {}
-    for key, frac in (("однородная ткань", 0.0), ("фиброз 25 %", 0.25)):
+    for key, frac in (("однородная ткань", 0.0),):
         t0 = time.time()
         s = sheet(frac)
         res[key] = s
@@ -453,8 +467,8 @@ def scenario_reentry():
             f"{np.mean(cl):.0f} ± {np.std(cl):.0f} мс (ЧСС {60000 / np.mean(cl):.0f}/мин); "
             f"доминирующий период ЭКГ {per:.0f} мс; счёт {time.time() - t0:.1f} с")
 
-    fig = plt.figure(figsize=(15, 8))
-    g = fig.add_gridspec(3, 6, height_ratios=[1, 1, 0.9])
+    fig = plt.figure(figsize=(15, 5.5))
+    g = fig.add_gridspec(2, 6, height_ratios=[1, 0.9])
     for row, (key, s) in enumerate(res.items()):
         idxs = [np.argmin(np.abs(s["ft"] - tt)) for tt in (300, s["t_s2"] + 60, 1200, 2000, 3000, 3900)]
         for c, i in enumerate(idxs):
@@ -465,7 +479,7 @@ def scenario_reentry():
             ax.set_xticks([]); ax.set_yticks([])
             if c == 0:
                 ax.set_ylabel(key)
-    ax = fig.add_subplot(g[2, :])
+    ax = fig.add_subplot(g[1, :])
     for k, (key, s) in enumerate(res.items()):
         e = s["ecg"] / np.abs(s["ecg"]).max()
         ax.plot(s["t"], e - 2.3 * k, lw=1.1, color=("#d62728", "#1f3b73")[k], label=key)
@@ -473,15 +487,14 @@ def scenario_reentry():
     ax.set_yticks([])
     ax.legend(loc="upper right", fontsize=9)
     ax.set_xlabel("время, мс")
-    ax.set_title("Псевдо-ЭКГ фрагмента: мономорфная тахикардия (стабильная спираль) и "
-                 "нерегулярная активность при фиброзе (модель фибрилляции)")
+    ax.set_title("Псевдо-ЭКГ фрагмента: мономорфная желудочковая тахикардия (стабильная спираль)")
     ax.grid(True, color="#f4b6b6")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "07_reentry.png"), dpi=110)
     plt.close(fig)
 
     # анимация спиральной волны
-    for key, fname in (("однородная ткань", "spiral.gif"), ("фиброз 25 %", "fibrillation.gif")):
+    for key, fname in (("однородная ткань", "spiral.gif"),):
         s = res[key]
         fig, ax = plt.subplots(figsize=(4, 4))
         im = ax.imshow(np.where(s["fib"], np.nan, to_mv(s["frames"][0])), cmap="inferno",
@@ -506,7 +519,7 @@ if __name__ == "__main__":
     t_all = time.time()
     scale = scenario_normal() if "normal" in which else None
     if scale is None:
-        r = run(Heart(), 800)
+        r = run(Heart(), 1000, bpm=60)
         scale = np.abs(r["leads"]["II"]).max()
     if "avblock" in which:
         scenario_avblock(scale)

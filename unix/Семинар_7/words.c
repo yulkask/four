@@ -54,6 +54,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    //компиляция регулярного выражения
     rc = regcomp(&preg, WORD_RE, REG_EXTENDED | REG_ENHANCED);
     if (rc != 0) {
         char err[256];
@@ -62,11 +63,13 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    // цикл чтения 
     while (getline(&line, &cap, fp) != -1)
         total += print_words(&preg, line);
 
     printf("Всего слов: %d\n", total);
-
+ 
+    // освобождение ресурсов 
     free(line);
     regfree(&preg);
     if (fp != stdin)

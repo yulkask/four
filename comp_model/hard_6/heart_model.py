@@ -47,9 +47,9 @@ class AlievPanfilov:
         self.k, self.a = k, a
         self.eps0, self.mu1, self.mu2 = eps0, mu1, mu2
 
-    def rhs(self, u, v, k=None):
+    def rhs(self, u, v, k=None, a=None):
         k = self.k if k is None else k
-        a = self.a
+        a = self.a if a is None else a
         fu = k * u * (u - a) * (1.0 - u) - u * v
         eps = self.eps0 + self.mu1 * v / (u + self.mu2)
         fv = eps * (-v - k * u * (u - a - 1.0))
@@ -66,10 +66,11 @@ class Tissue:
 
     D      - массив (ny, nx) коэффициентов диффузии; D > 0 - ткань
     k      - скаляр или поле параметра k (длительность ПД)
+    a      - скаляр или поле порога возбуждения a
     method - "imex" или "explicit"
     """
 
-    def __init__(self, D, dx, dt, model=None, k=None, method="imex"):
+    def __init__(self, D, dx, dt, model=None, k=None, a=None, method="imex"):
         self.D = np.asarray(D, dtype=float)
         self.shape = self.D.shape
         self.mask = self.D > 0
@@ -115,6 +116,8 @@ class Tissue:
 
         kk = self.model.k if k is None else k
         self.k = np.broadcast_to(np.asarray(kk, float), self.shape).ravel()[self.idx].copy()
+        aa = self.model.a if a is None else a
+        self.a = np.broadcast_to(np.asarray(aa, float), self.shape).ravel()[self.idx].copy()
         self.u = np.zeros(n)
         self.v = np.zeros(n)
         self.t = 0.0
@@ -132,7 +135,7 @@ class Tissue:
         return out.reshape(self.shape)
 
     def step(self, stim=None):
-        fu, fv = self.model.rhs(self.u, self.v, self.k)
+        fu, fv = self.model.rhs(self.u, self.v, self.k, self.a)
         if stim is not None:
             fu = fu + stim
         if self.method == "explicit":
