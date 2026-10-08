@@ -1,0 +1,72 @@
+:root {
+    --bg: #f5f6f8; --card: #fff; --text: #1d2330; --muted: #6b7280;
+    --accent: #2f5bd3; --border: #dfe3ea; --err: #b42318; --ok: #067647;
+    --debt: #b42318; --over: #067647; --head: #eef1f6; --zebra: #fafbfc;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #14171d; --card: #1d212a; --text: #e6e8ec; --muted: #9aa1ad;
+        --accent: #7aa2ff; --border: #2e3440; --err: #ff8a80; --ok: #6ee7a8;
+        --debt: #ff8a80; --over: #6ee7a8; --head: #252a35; --zebra: #20242d;
+    }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+       font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { background: var(--card); border-bottom: 1px solid var(--border);
+         padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: center; }
+.brand { font-weight: 700; }
+.brand span { font-weight: 400; color: var(--muted); font-size: 13px; margin-left: 6px; }
+nav { display: flex; flex-wrap: wrap; gap: 4px; }
+nav a { color: var(--text); text-decoration: none; padding: 5px 10px; border-radius: 6px; font-size: 14px; }
+nav a:hover { background: var(--bg); }
+nav a.active { background: var(--accent); color: #fff; }
+main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
+h1 { font-size: 22px; margin: 0 0 14px; }
+h2 { font-size: 17px; margin: 0 0 12px; }
+.card { background: var(--card); border: 1px solid var(--border);
+        border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.stat b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 13px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field label { font-size: 12px; color: var(--muted); }
+input, select { font: inherit; color: var(--text); background: var(--bg);
+        border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
+button, .btn { font: inherit; background: var(--accent); color: #fff; border: 0; text-decoration: none;
+         border-radius: 8px; padding: 8px 16px; cursor: pointer; display: inline-block; }
+.btn.light { background: transparent; color: var(--accent); border: 1px solid var(--border); }
+button.link { background: none; color: var(--err); padding: 0 4px; font-size: 13px; }
+a.link { color: var(--accent); font-size: 13px; text-decoration: none; padding: 0 4px; }
+.sql { font-family: ui-monospace, Menlo, monospace; font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+.error { color: var(--err); }
+.ok { color: var(--ok); }
+.muted { color: var(--muted); font-size: 13px; }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: middle; }
+th { font-size: 13px; color: var(--muted); font-weight: 600; background: var(--head); }
+td.num, th.num { text-align: right; white-space: nowrap; }
+tr.total td { font-weight: 700; border-top: 2px solid var(--border); }
+.debt { color: var(--debt); }
+.over { color: var(--over); }
+
+/* Оборотная ведомость: в клетке три строки */
+table.sheet { font-size: 12.5px; }
+table.sheet th, table.sheet td { border: 1px solid var(--border); text-align: center; padding: 4px 6px; }
+table.sheet td.cell { text-align: right; line-height: 1.35; white-space: nowrap; }
+table.sheet td.cell div:nth-child(2) { color: var(--muted); }
+table.sheet td.cell div:nth-child(3) { font-weight: 600; }
+table.sheet tbody tr:nth-child(even) td { background: var(--zebra); }
+.legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+
+/* Ведомость по квартире */
+table.acc th, table.acc td { border: 1px solid var(--border); text-align: center; }
+table.acc td.num { text-align: right; }
+table.acc .big { font-size: 18px; font-weight: 700; }
+
+@media print {
+    header, form.card, .noprint { display: none !important; }
+    .card { border: 0; padding: 0; }
+}

@@ -1,0 +1,47 @@
+# Стенд: MySQL 8 + phpMyAdmin + веб-интерфейс учёта квартплаты (PHP)
+# Порты отличаются от lab_1_2, чтобы стенды можно было запускать одновременно
+services:
+  db:
+    image: mysql:8.0
+    container_name: kv_db
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: kvartplata
+      MYSQL_USER: kvartplata
+      MYSQL_PASSWORD: kvartplata
+    ports:
+      - "3308:3306"
+    volumes:
+      # при первом запуске выполняются по алфавиту
+      - ./sql/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./sql/02_data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+      - ./sql/03_procedures.sql:/docker-entrypoint-initdb.d/03_procedures.sql:ro
+      - ./sql:/sql:ro
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: kv_pma
+    environment:
+      PMA_HOST: db
+      PMA_USER: root
+      PMA_PASSWORD: root
+    ports:
+      - "8081:80"
+    depends_on:
+      - db
+
+  web:
+    build: ./web
+    container_name: kv_web
+    environment:
+      DB_HOST: db
+      DB_NAME: kvartplata
+      DB_USER: kvartplata
+      DB_PASS: kvartplata
+    ports:
+      - "8001:80"
+    volumes:
+      - ./web:/var/www/html
+    depends_on:
+      - db
