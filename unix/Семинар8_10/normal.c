@@ -14,7 +14,7 @@
 
 enum { CHILD_PI = 0, CHILD_EXP = 1, NCHILD = 2 };
 
-// Что потомок передаёт родителю через канал. */
+// Что потомок передаёт родителю через канал. 
 struct result {
 	double value; // вычисленное значение 
 	long terms;   // сколько членов ряда понадобилось 
@@ -58,7 +58,7 @@ static double arctan_series(double z, long *terms)
 	return sum;
 }
 
-/* Формула Мэчина: pi = 16*arctg(1/5) - 4*arctg(1/239). */
+// Формула Мэчина: pi = 16*arctg(1/5) - 4*arctg(1/239). 
 static double compute_pi(long *terms)
 {
 	*terms = 0;
@@ -94,7 +94,7 @@ static double compute_exp(double x, long *terms)
 	return 1.0 / sum;
 }
 
-// write() может записать меньше запрошенного или прерваться сигналом. 
+// запись в канал
 static int write_full(int fd, const void *buf, size_t len)
 {
 	const char *p = buf;
@@ -141,7 +141,7 @@ static void child_run(int which, double x, int wfd, const sigset_t *waitmask)
 	struct result res;
 
 	/* Ждём сигнала на старт. sigsuspend() атомарно разблокирует сигналы
-	 * и засыпает, поэтому сигнал не может «проскочить» мимо. */
+	 * и засыпает, поэтому сигнал не может пройти мимо. */
 	while (!got_start)
 		sigsuspend(waitmask);
 

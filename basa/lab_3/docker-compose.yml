@@ -1,6 +1,5 @@
 # Стенд: MySQL 8 + phpMyAdmin + веб-интерфейс учёта квартплаты (PHP)
-# Порты отличаются от lab_1_2, чтобы стенды можно было запускать одновременно
-services:
+
   db:
     image: mysql:8.0
     container_name: kv_db
