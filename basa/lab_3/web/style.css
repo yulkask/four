@@ -21,7 +21,7 @@ nav { display: flex; flex-wrap: wrap; gap: 4px; }
 nav a { color: var(--text); text-decoration: none; padding: 5px 10px; border-radius: 6px; font-size: 14px; }
 nav a:hover { background: var(--bg); }
 nav a.active { background: var(--accent); color: #fff; }
-main { max-width: 1280px; margin: 0 auto; padding: 20px 16px 48px; }
+main { max-width: 1560px; margin: 0 auto; padding: 20px 16px 48px; }
 h1 { font-size: 22px; margin: 0 0 14px; }
 h2 { font-size: 17px; margin: 0 0 12px; }
 .card { background: var(--card); border: 1px solid var(--border);
@@ -62,7 +62,8 @@ table.sheet tbody tr:nth-child(even) td { background: var(--zebra); }
 .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-bottom: 10px; }
 
 /* Ведомость по квартире */
-table.acc th, table.acc td { border: 1px solid var(--border); text-align: center; }
+table.acc { font-size: 13.5px; }
+table.acc th, table.acc td { border: 1px solid var(--border); text-align: center; padding: 5px 6px; }
 table.acc td.num { text-align: right; }
 table.acc .big { font-size: 18px; font-weight: 700; }
 
