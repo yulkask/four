@@ -8,22 +8,25 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-/* Суммирование прекращается, когда очередной член ряда становится
- * пренебрежимо мал по сравнению с уже накопленной суммой. */
-#define EPS 1e-17
+/* Сколько секунд потомки считают ряды, прежде чем родитель пошлёт сигнал
+ * на завершение. Ряды сходятся за доли миллисекунды, так что этого с запасом
+ * хватает. */
+#define WORK_TIME 2
 
 enum { CHILD_PI = 0, CHILD_EXP = 1, NCHILD = 2 };
 
-// Что потомок передаёт родителю через канал. 
+// Что потомок передаёт родителю через канал.
 struct result {
-	double value; // вычисленное значение 
-	long terms;   // сколько членов ряда понадобилось 
+	double value;    // вычисленное значение
+	long terms;      // сколько членов ряда реально изменили сумму
+	long iterations; // сколько раз прошёл цикл до сигнала остановки
 };
 
 /* Флаги, которые выставляет обработчик сигналов. Тип volatile sig_atomic_t
  * гарантирует корректную запись из обработчика и чтение в основном коде. */
-static volatile sig_atomic_t got_start = 0;
-static volatile sig_atomic_t got_stop = 0;
+static volatile sig_atomic_t got_start = 0; // потомок: пришёл SIGUSR1
+static volatile sig_atomic_t got_stop = 0;  // потомок: пришёл SIGUSR2
+static volatile sig_atomic_t got_alarm = 0; // родитель: пришёл SIGALRM
 
 static void on_signal(int sig)
 {
@@ -31,39 +34,45 @@ static void on_signal(int sig)
 		got_start = 1;
 	else if (sig == SIGUSR2)
 		got_stop = 1;
+	else if (sig == SIGALRM)
+		got_alarm = 1;
 }
 
 /*
- * arctg(z) = z - z^3/3 + z^5/5 - z^7/7 + ...      (|z| < 1)
+ * Число pi по формуле Мэчина:
  *
- * Степень z^(2n+1) не вычисляется заново на каждом шаге: она получается
- * из предыдущей умножением на z^2.
+ *     pi = 16*arctg(1/5) - 4*arctg(1/239),
+ *     arctg(z) = z - z^3/3 + z^5/5 - z^7/7 + ...
+ *
+ * Оба ряда суммируются в одном цикле, каждый в свою сумму. Степени
+ * не вычисляются заново: каждая получается из предыдущей умножением на z^2.
+ *
+ * Цикл идёт до сигнала SIGUSR2 от родителя.
  */
-static double arctan_series(double z, long *terms)
+static void compute_pi(struct result *r)
 {
-	double z2 = z * z;
-	double power = z; /* z^(2n+1) */
-	double sum = 0.0;
+	double p5 = 1.0 / 5.0;     // (1/5)^(2n+1)
+	double p239 = 1.0 / 239.0; // (1/239)^(2n+1)
+	const double q5 = p5 * p5;
+	const double q239 = p239 * p239;
+	double s5 = 0.0, s239 = 0.0; // arctg(1/5) и arctg(1/239)
 	long n = 0;
 
-	for (;;) {
-		double term = power / (2 * n + 1);
-		if (term < EPS * fabs(sum))
-			break;
-		sum += (n % 2 == 0) ? term : -term;
-		power *= z2;
+	r->terms = 0;
+	while (!got_stop) {
+		double sign = (n % 2 == 0) ? 1.0 : -1.0;
+		double next5 = s5 + sign * p5 / (2 * n + 1);
+		double next239 = s239 + sign * p239 / (2 * n + 1);
+		if (next5 != s5 || next239 != s239) // член ещё влияет на сумму
+			r->terms = n + 1;
+		s5 = next5;
+		s239 = next239;
+		p5 *= q5;
+		p239 *= q239;
 		n++;
 	}
-	*terms += n;
-	return sum;
-}
-
-// Формула Мэчина: pi = 16*arctg(1/5) - 4*arctg(1/239). 
-static double compute_pi(long *terms)
-{
-	*terms = 0;
-	return 16.0 * arctan_series(1.0 / 5.0, terms)
-	     - 4.0 * arctan_series(1.0 / 239.0, terms);
+	r->iterations = n;
+	r->value = 16.0 * s5 - 4.0 * s239;
 }
 
 /*
@@ -77,24 +86,30 @@ static double compute_pi(long *terms)
  *
  * Факториал отдельно не вычисляется: каждый член получается из предыдущего
  * умножением на t и делением на номер шага n:  t^n/n! = (t^(n-1)/(n-1)!) * t / n.
+ *
+ * Цикл идёт до сигнала SIGUSR2 от родителя.
  */
-static double compute_exp(double x, long *terms)
+static void compute_exp(double x, struct result *r)
 {
 	double t = x * x / 2.0;
-	double term = 1.0; /* t^0 / 0! */
+	double term = 1.0; // t^0 / 0!
 	double sum = 1.0;
 	long n = 0;
 
-	while (term > EPS * sum) {
+	r->terms = 0;
+	while (!got_stop) {
 		n++;
 		term = term * t / n;
-		sum += term;
+		double next = sum + term;
+		if (next != sum) // член ещё влияет на сумму
+			r->terms = n;
+		sum = next;
 	}
-	*terms = n;
-	return 1.0 / sum;
+	r->iterations = n;
+	r->value = 1.0 / sum;
 }
 
-// запись в канал
+// write() может записать меньше запрошенного или прерваться сигналом.
 static int write_full(int fd, const void *buf, size_t len)
 {
 	const char *p = buf;
@@ -111,7 +126,7 @@ static int write_full(int fd, const void *buf, size_t len)
 	return 0;
 }
 
-// Возвращает 0, если прочитано ровно len байт, иначе -1. 
+// Возвращает 0, если прочитано ровно len байт, иначе -1.
 static int read_full(int fd, void *buf, size_t len)
 {
 	char *p = buf;
@@ -132,8 +147,8 @@ static int read_full(int fd, void *buf, size_t len)
 }
 
 /*
- * Код процесса-потомка. Сюда попадаем сразу после fork(), когда SIGUSR1
- * и SIGUSR2 ещё заблокированы; waitmask - маска, в которой они разрешены.
+ * Код процесса-потомка. Сюда попадаем сразу после fork(), когда сигналы
+ * ещё заблокированы; waitmask - маска, в которой они разрешены.
  */
 static void child_run(int which, double x, int wfd, const sigset_t *waitmask)
 {
@@ -141,32 +156,34 @@ static void child_run(int which, double x, int wfd, const sigset_t *waitmask)
 	struct result res;
 
 	/* Ждём сигнала на старт. sigsuspend() атомарно разблокирует сигналы
-	 * и засыпает, поэтому сигнал не может пройти мимо. */
+	 * и засыпает, поэтому сигнал не может «проскочить» мимо. */
 	while (!got_start)
 		sigsuspend(waitmask);
 
-	printf("  [потомок %d] pid=%d ppid=%d: получен SIGUSR1, вычисляю %s\n",
+	/* Во время счёта сигналы должны быть разрешены, иначе SIGUSR2
+	 * не дойдёт до обработчика и цикл не остановится. */
+	sigprocmask(SIG_SETMASK, waitmask, NULL);
+
+	printf("  [потомок %d] pid=%d ppid=%d: получен SIGUSR1, начинаю цикл %s\n",
 	       which, (int)getpid(), (int)getppid(), names[which]);
 	fflush(stdout);
 
+	// Цикл суммирования ряда - до сигнала SIGUSR2.
 	if (which == CHILD_PI)
-		res.value = compute_pi(&res.terms);
+		compute_pi(&res);
 	else
-		res.value = compute_exp(x, &res.terms);
+		compute_exp(x, &res);
+
+	printf("  [потомок %d] pid=%d: получен SIGUSR2, цикл остановлен после "
+	       "%ld итераций, отправляю результат\n",
+	       which, (int)getpid(), res.iterations);
+	fflush(stdout);
 
 	if (write_full(wfd, &res, sizeof res) < 0) {
 		perror("write");
 		_exit(EXIT_FAILURE);
 	}
 	close(wfd);
-
-	// Результат отправлен - ждём сигнала на завершение.
-	while (!got_stop)
-		sigsuspend(waitmask);
-
-	printf("  [потомок %d] pid=%d: получен SIGUSR2, завершаюсь\n",
-	       which, (int)getpid());
-	fflush(stdout);
 	exit(EXIT_SUCCESS);
 }
 
@@ -221,16 +238,18 @@ int main(int argc, char *argv[])
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGUSR1, &sa, NULL);
 	sigaction(SIGUSR2, &sa, NULL);
+	sigaction(SIGALRM, &sa, NULL);
 
-	/* Блокируем SIGUSR1/SIGUSR2 до fork(): если родитель пошлёт сигнал
-	 * раньше, чем потомок дойдёт до ожидания, сигнал не потеряется,
-	 * а останется «отложенным» до вызова sigsuspend(). */
+	/* Блокируем сигналы до fork(): если сигнал придёт раньше, чем процесс
+	 * дойдёт до ожидания, он не потеряется, а останется «отложенным»
+	 * до вызова sigsuspend(). */
 	sigemptyset(&block);
 	sigaddset(&block, SIGUSR1);
 	sigaddset(&block, SIGUSR2);
+	sigaddset(&block, SIGALRM);
 	sigprocmask(SIG_BLOCK, &block, &oldmask);
 
-	//Два неименованных канала: fds[i][0] - чтение, fds[i][1] - запись.
+	// Два неименованных канала: fds[i][0] - чтение, fds[i][1] - запись.
 	for (i = 0; i < NCHILD; i++) {
 		if (pipe(fds[i]) < 0) {
 			perror("pipe");
@@ -255,7 +274,7 @@ int main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		}
 		if (pid[i] == 0) {
-			// Потомок оставляет себе только конец записи своего канала. 
+			// Потомок оставляет себе только конец записи своего канала.
 			for (j = 0; j < NCHILD; j++) {
 				close(fds[j][0]);
 				if (j != i)
@@ -270,16 +289,28 @@ int main(int argc, char *argv[])
 	 * завершится, не записав результат, read() вернёт 0, а не зависнет. */
 	for (i = 0; i < NCHILD; i++)
 		close(fds[i][1]);
-	sigprocmask(SIG_SETMASK, &oldmask, NULL);
 
-	// Сигнал на старт - оба потомка начинают считать параллельно. 
+	// Запуск: сначала kill(SIGUSR1), после него у потомков начинается цикл.
 	for (i = 0; i < NCHILD; i++) {
 		printf("[родитель] посылаю SIGUSR1 потомку %d\n", i);
 		fflush(stdout);
 		kill(pid[i], SIGUSR1);
 	}
 
-	// Читаем результаты из каналов (read блокируется до их появления). 
+	/* Потомки считают параллельно. Через WORK_TIME секунд alarm() пришлёт
+	 * родителю SIGALRM; до этого родитель спит в sigsuspend(). */
+	alarm(WORK_TIME);
+	while (!got_alarm)
+		sigsuspend(&oldmask);
+
+	// Завершение: SIGUSR2 останавливает цикл суммирования в потомках.
+	for (i = 0; i < NCHILD; i++) {
+		printf("[родитель] посылаю SIGUSR2 потомку %d\n", i);
+		fflush(stdout);
+		kill(pid[i], SIGUSR2);
+	}
+
+	// Читаем результаты из каналов (read блокируется до их появления).
 	for (i = 0; i < NCHILD; i++) {
 		if (read_full(fds[i][0], &res[i], sizeof res[i]) < 0) {
 			fprintf(stderr, "[родитель] не удалось получить результат "
@@ -289,12 +320,7 @@ int main(int argc, char *argv[])
 		close(fds[i][0]);
 	}
 
-	// Сигнал на завершение и ожидание потомков. 
-	for (i = 0; i < NCHILD; i++) {
-		printf("[родитель] посылаю SIGUSR2 потомку %d\n", i);
-		fflush(stdout);
-		kill(pid[i], SIGUSR2);
-	}
+	// Ожидание завершения потомков.
 	for (i = 0; i < NCHILD; i++) {
 		int status;
 		pid_t done = wait(&status);
@@ -325,9 +351,9 @@ int main(int argc, char *argv[])
 	double check = exp(-x * x / 2.0) / sqrt(2.0 * M_PI);
 
 	printf("\nРезультаты:\n");
-	printf("  pi          = %.17g  (%ld членов ряда)\n",
+	printf("  pi          = %.17g  (значимых членов ряда: %ld)\n",
 	       pi, res[CHILD_PI].terms);
-	printf("  exp(-x^2/2) = %.17g  (%ld членов ряда)\n",
+	printf("  exp(-x^2/2) = %.17g  (значимых членов ряда: %ld)\n",
 	       e, res[CHILD_EXP].terms);
 	printf("  f(%g) = %.17g\n", x, f);
 	printf("\nПроверка по libm: f(%g) = %.17g, разница %.3g\n",
