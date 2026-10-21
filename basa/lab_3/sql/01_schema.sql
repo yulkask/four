@@ -16,6 +16,21 @@ DROP TABLE IF EXISTS payments;
 DROP TABLE IF EXISTS charges;
 DROP TABLE IF EXISTS saldo;
 DROP TABLE IF EXISTS accounts;
+DROP TABLE IF EXISTS bank_imports;
+
+-- Загрузки банковских выписок (для истории и отмены загрузки)
+CREATE TABLE bank_imports (
+    id          INT UNSIGNED  NOT NULL AUTO_INCREMENT,
+    file_name   VARCHAR(255)  NOT NULL COMMENT 'Имя загруженного файла',
+    bank_account VARCHAR(20)  NULL COMMENT 'Расчётный счёт из выписки',
+    date_from   DATE          NULL COMMENT 'Первая операция в выписке',
+    date_to     DATE          NULL COMMENT 'Последняя операция в выписке',
+    imported_at DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Когда загружена',
+    ops_total   INT UNSIGNED  NOT NULL DEFAULT 0 COMMENT 'Операций в выписке',
+    ops_loaded  INT UNSIGNED  NOT NULL DEFAULT 0 COMMENT 'Загружено платежей',
+    amount      DECIMAL(14,2) NOT NULL DEFAULT 0 COMMENT 'Сумма загруженных платежей',
+    PRIMARY KEY (id)
+) ENGINE = InnoDB COMMENT = 'Загрузки банковских выписок';
 
 -- Справочник лицевых счетов (на него ссылаются три основные таблицы)
 CREATE TABLE accounts (
@@ -23,12 +38,15 @@ CREATE TABLE accounts (
     account_no VARCHAR(10)   NOT NULL COMMENT 'Номер лицевого счёта',
     flat       SMALLINT UNSIGNED NOT NULL COMMENT 'Номер квартиры',
     owner      VARCHAR(150)  NOT NULL COMMENT 'Ответственный квартиросъёмщик',
-    area       DECIMAL(6,2)  NOT NULL COMMENT 'Общая площадь, м²',
+    area       DECIMAL(6,2)  NULL COMMENT 'Общая площадь, м² (у счетов из банковской выписки может быть неизвестна)',
     residents  TINYINT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Число проживающих',
+    import_id  INT UNSIGNED  NULL COMMENT 'Загрузка выписки, при которой счёт создан автоматически',
     PRIMARY KEY (id),
     UNIQUE KEY uq_account_no (account_no),
     UNIQUE KEY uq_flat (flat),
     CONSTRAINT chk_account_no CHECK (account_no REGEXP '^[0-9]{6,10}$'),
+    CONSTRAINT fk_accounts_import FOREIGN KEY (import_id) REFERENCES bank_imports (id)
+        ON DELETE SET NULL,
     CONSTRAINT chk_area CHECK (area > 0)
 ) ENGINE = InnoDB COMMENT = 'Лицевые счета';
 
@@ -68,9 +86,16 @@ CREATE TABLE payments (
     amount     DECIMAL(12,2) NOT NULL COMMENT 'Сумма платежа',
     source     VARCHAR(30)   NOT NULL DEFAULT 'Банк' COMMENT 'Способ оплаты',
     doc_no     VARCHAR(20)   NULL COMMENT 'Номер платёжного документа',
+    payer      VARCHAR(255)  NULL COMMENT 'Плательщик (из банковской выписки)',
+    purpose    VARCHAR(500)  NULL COMMENT 'Назначение платежа (из банковской выписки)',
+    import_id  INT UNSIGNED  NULL COMMENT 'Загрузка выписки, из которой получен платёж',
+    bank_ref   CHAR(40)      NULL COMMENT 'Отпечаток операции выписки: защита от повторной загрузки',
     PRIMARY KEY (id),
     KEY ix_payments_account_date (account_id, pay_date),
+    UNIQUE KEY uq_payments_bank_ref (bank_ref),
     CONSTRAINT fk_payments_account FOREIGN KEY (account_id) REFERENCES accounts (id)
+        ON DELETE CASCADE,
+    CONSTRAINT fk_payments_import FOREIGN KEY (import_id) REFERENCES bank_imports (id)
         ON DELETE CASCADE,
     CONSTRAINT chk_payments_amount CHECK (amount > 0)
 ) ENGINE = InnoDB COMMENT = 'Платежи по лицевому счёту';

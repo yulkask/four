@@ -77,6 +77,7 @@ function layout_start(string $title, string $active): void
         'edit.php?t=saldo'          => 'Сальдо',
         'edit.php?t=charges'        => 'Начисления',
         'edit.php?t=payments'       => 'Платежи',
+        'import.php'                => 'Импорт выписки',
         'turnover.php'              => 'Оборотная ведомость',
         'account.php'               => 'По квартире',
         'debtors.php'               => 'Должники',

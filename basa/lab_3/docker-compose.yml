@@ -1,5 +1,5 @@
 # Стенд: MySQL 8 + phpMyAdmin + веб-интерфейс учёта квартплаты (PHP)
-
+services:
   db:
     image: mysql:8.0
     container_name: kv_db

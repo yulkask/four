@@ -11,7 +11,7 @@ $tables = [
             'account_no' => ['Лицевой счёт', 'text', 'pattern' => '[0-9]{6,10}'],
             'flat'       => ['Квартира', 'int'],
             'owner'      => ['Квартиросъёмщик', 'text', 'size' => 32],
-            'area'       => ['Площадь, м²', 'money'],
+            'area'       => ['Площадь, м²', 'money', 'optional' => true],
             'residents'  => ['Проживает', 'int'],
         ],
     ],
@@ -50,8 +50,11 @@ $tables = [
             'amount'     => ['Сумма', 'money'],
             'source'     => ['Способ', 'select', 'options' => PAY_SOURCES],
             'doc_no'     => ['№ документа', 'text', 'optional' => true],
+            'payer'      => ['Плательщик', 'text', 'optional' => true, 'size' => 22],
+            'purpose'    => ['Назначение платежа', 'text', 'optional' => true, 'size' => 30],
         ],
-        'help'   => 'Платёж учитывается в месяце поступления на расчётный счёт.',
+        'help'   => 'Платёж учитывается в месяце поступления на расчётный счёт. '
+                  . 'Платежи из банковской выписки загружаются на странице «Импорт выписки».',
     ],
 ];
 
@@ -62,6 +65,7 @@ $self = 'edit.php?t=' . $t;
 
 // фильтры списка
 $fAccount = (int)($_GET['account'] ?? 0);
+$fImport = $t === 'payments' ? (int)($_GET['import'] ?? 0) : 0;
 $fMonth = preg_match('/^\d{4}-\d{2}$/', $_GET['month'] ?? '') ? $_GET['month'] : null;
 // начислений много — по умолчанию показываем последний месяц
 if ($t === 'charges' && !isset($_GET['month'])) {
@@ -158,6 +162,10 @@ if ($t !== 'accounts') {
     if ($fMonth) {
         $where[] = "DATE_FORMAT(t.{$cfg['filter']}, '%Y-%m') = ?";
         $params[] = $fMonth;
+    }
+    if ($fImport) {
+        $where[] = 't.import_id = ?';
+        $params[] = $fImport;
     }
     $sql = "SELECT t.*, a.flat, a.account_no FROM $t t JOIN accounts a ON a.id = t.account_id"
          . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . " ORDER BY {$cfg['order']}";

@@ -71,3 +71,16 @@ table.acc .big { font-size: 18px; font-weight: 700; }
     header, form.card, .noprint { display: none !important; }
     .card { border: 0; padding: 0; }
 }
+
+/* Импорт банковской выписки */
+.warn { color: #b54708; }
+@media (prefers-color-scheme: dark) { .warn { color: #fdb022; } }
+.small { font-size: 12px; }
+.nowrap { white-space: nowrap; }
+table.import { font-size: 13px; }
+table.import td.purpose { min-width: 260px; color: var(--muted); }
+table.import input.flat { width: 80px; padding: 4px 6px; }
+table.import tr[data-s=dup] td { opacity: .55; }
+.filters .btn { padding: 4px 10px; font-size: 13px; }
+.filters .btn.on { background: var(--accent); color: #fff; }
+.stat span { overflow-wrap: anywhere; }
