@@ -289,7 +289,8 @@ function payer_parts(string $payer): array
 {
     if (str_contains($payer, '//')) {
         $p = array_values(array_filter(array_map('trim', explode('//', $payer)), 'strlen'));
-        $name = $p[1] ?? $p[0];
+        // ВТБ ставит перед ФИО служебную пометку «БД»
+        $name = preg_replace('/^БД\s+/u', '', $p[1] ?? $p[0]);
         $address = '';
         foreach (array_slice($p, 2) as $part) {
             if (!preg_match('/^\d+$/', $part)) $address .= ' ' . $part;
@@ -350,4 +351,68 @@ function detect_flat(string $purpose, string $payer): array
         }
     }
     return [null, null];
+}
+
+// ---------- запись в базу ----------
+
+// Владелец нового лицевого счёта — плательщик, если похоже на ФИО
+function owner_name(string $payer): string
+{
+    $name = payer_parts($payer)['name'];
+    if (preg_match('/^[А-ЯЁа-яё-]+(\s+[А-ЯЁа-яё.-]+){1,3}$/u', $name)) {
+        return mb_convert_case(mb_strtolower($name), MB_CASE_TITLE);
+    }
+    return 'Не указан';
+}
+
+// Записывает поступление из выписки в payments.
+// $op: posted, doc_no, amount, payer (реквизиты целиком), purpose, ref.
+// $accByFlat — кэш «квартира => id лицевого счёта», пополняется при создании счёта.
+// Возвращает null при успехе или причину, по которой платёж не записан.
+function post_bank_payment(PDO $pdo, array $op, int $flat, bool $create, int $importId,
+                           array &$accByFlat, int &$newAccounts): ?string
+{
+    if ($flat <= 0) {
+        return 'квартира не указана';
+    }
+    $exists = $pdo->prepare('SELECT 1 FROM payments WHERE bank_ref = ?');
+    $exists->execute([$op['ref']]);
+    if ($exists->fetchColumn()) {
+        return 'уже загружен';
+    }
+    if (!isset($accByFlat[$flat])) {
+        if (!$create) {
+            return "нет лицевого счёта для кв. $flat";
+        }
+        $pdo->prepare('INSERT INTO accounts (account_no, flat, owner, area, residents, import_id)
+                       VALUES (?, ?, ?, NULL, 1, ?)')
+            ->execute([str_pad((string)$flat, 10, '0', STR_PAD_LEFT), $flat, owner_name($op['payer']), $importId]);
+        $accByFlat[$flat] = (int)$pdo->lastInsertId();
+        $newAccounts++;
+    }
+    $pdo->prepare('INSERT INTO payments
+            (account_id, pay_date, amount, source, doc_no, payer, purpose, import_id, bank_ref)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        ->execute([
+            $accByFlat[$flat], substr($op['posted'], 0, 10), $op['amount'], 'Банк', $op['doc_no'],
+            mb_substr(payer_parts($op['payer'])['name'], 0, 255), mb_substr($op['purpose'], 0, 500),
+            $importId, $op['ref'],
+        ]);
+    $pdo->prepare('UPDATE bank_imports SET ops_loaded = ops_loaded + 1, amount = amount + ? WHERE id = ?')
+        ->execute([$op['amount'], $importId]);
+    return null;
+}
+
+// Откладывает поступление в неразнесённые (если его там ещё нет)
+function hold_bank_payment(PDO $pdo, array $op, ?int $flat, string $reason, int $importId): bool
+{
+    $stmt = $pdo->prepare('INSERT IGNORE INTO bank_pending
+            (import_id, posted, doc_no, amount, payer, payer_raw, purpose, flat, reason, bank_ref)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    $stmt->execute([
+        $importId, $op['posted'], $op['doc_no'], $op['amount'],
+        mb_substr(payer_parts($op['payer'])['name'], 0, 255), mb_substr($op['payer'], 0, 500),
+        mb_substr($op['purpose'], 0, 1000), $flat ?: null, $reason, $op['ref'],
+    ]);
+    return $stmt->rowCount() > 0;
 }

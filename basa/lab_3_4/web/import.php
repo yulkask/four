@@ -52,12 +52,8 @@ try {
 
         $pdo = db();
         $accByFlat = $pdo->query('SELECT flat, id FROM accounts')->fetchAll(PDO::FETCH_KEY_PAIR);
-        $exists = $pdo->prepare('SELECT 1 FROM payments WHERE bank_ref = ?');
-        $insAcc = $pdo->prepare('INSERT INTO accounts (account_no, flat, owner, area, residents, import_id)
-                                 VALUES (?, ?, ?, NULL, 1, ?)');
-        $insPay = $pdo->prepare('INSERT INTO payments
-            (account_id, pay_date, amount, source, doc_no, payer, purpose, import_id, bank_ref)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $known = array_flip($pdo->query('SELECT bank_ref FROM payments WHERE bank_ref IS NOT NULL
+                                         UNION SELECT bank_ref FROM bank_pending')->fetchAll(PDO::FETCH_COLUMN));
 
         $dates = array_column($ops, 'posted');
         $pdo->beginTransaction();
@@ -67,47 +63,33 @@ try {
                        substr(max($dates), 0, 10), count($ops)]);
         $importId = (int)$pdo->lastInsertId();
 
-        $loaded = $sum = $newAcc = $skipped = 0;
-        foreach ($selected as $i) {
-            $op = $ops[$i] ?? null;
+        // выбранные строки — в платежи; всё остальное, что поступило на счёт, — в неразнесённые
+        $loaded = $sum = $newAcc = $held = 0;
+        $selected = array_flip($selected);
+        foreach ($ops as $i => $op) {
+            if ($op['direction'] !== 'in' || isset($known[$op['ref']])) {
+                continue;
+            }
             $flat = (int)($flats[$i] ?? 0);
-            if (!$op || $op['direction'] !== 'in' || $flat <= 0) {
-                $skipped++;
-                continue;
+            $reason = isset($selected[$i])
+                ? post_bank_payment($pdo, $op, $flat, $create, $importId, $accByFlat, $newAcc)
+                : ($flat > 0 ? 'не выбран при загрузке' : 'квартира не определена');
+            if ($reason === null) {
+                $loaded++;
+                $sum += $op['amount'];
+            } elseif (hold_bank_payment($pdo, $op, $flat, $reason, $importId)) {
+                $held++;
             }
-            $exists->execute([$op['ref']]);
-            if ($exists->fetchColumn()) {
-                $skipped++;
-                continue;
-            }
-            if (!isset($accByFlat[$flat])) {
-                if (!$create) {
-                    $skipped++;
-                    continue;
-                }
-                $insAcc->execute([str_pad((string)$flat, 10, '0', STR_PAD_LEFT), $flat, owner_name($op['payer']), $importId]);
-                $accByFlat[$flat] = (int)$pdo->lastInsertId();
-                $newAcc++;
-            }
-            $insPay->execute([
-                $accByFlat[$flat], substr($op['posted'], 0, 10), $op['amount'], 'Банк',
-                $op['doc_no'], mb_substr(payer_parts($op['payer'])['name'], 0, 255),
-                mb_substr($op['purpose'], 0, 500), $importId, $op['ref'],
-            ]);
-            $loaded++;
-            $sum += $op['amount'];
         }
-        if ($loaded === 0) {
+        if ($loaded + $held === 0) {
             $pdo->rollBack();
-            throw new RuntimeException('Ни один платёж не загружен: не выбраны строки, не указаны квартиры или платежи уже были загружены');
+            throw new RuntimeException('Новых поступлений нет: все платежи этой выписки уже загружены или отложены в неразнесённые');
         }
-        $pdo->prepare('UPDATE bank_imports SET ops_loaded = ?, amount = ? WHERE id = ?')
-            ->execute([$loaded, $sum, $importId]);
         $pdo->commit();
         unset($_SESSION['bank']);
         back(sprintf('Загружено платежей: %d на сумму %s ₽%s%s', $loaded, money($sum),
             $newAcc ? ", создано лицевых счетов: $newAcc" : '',
-            $skipped ? ", пропущено: $skipped" : ''));
+            $held ? ". Отложено в неразнесённые: $held — их можно доработать на странице «Неразнесённые»" : ''));
     }
 
     // ---------- отмена загрузки ----------
@@ -124,7 +106,7 @@ try {
         $acc->execute([$id]);
         $pdo->prepare('DELETE FROM bank_imports WHERE id = ?')->execute([$id]);
         $pdo->commit();
-        back('Загрузка отменена: платежи удалены' . ($acc->rowCount() ? ', удалено созданных лицевых счетов: ' . $acc->rowCount() : ''));
+        back('Загрузка отменена: её платежи и неразнесённые записи удалены' . ($acc->rowCount() ? ', удалено созданных лицевых счетов: ' . $acc->rowCount() : ''));
     }
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) {
@@ -133,24 +115,15 @@ try {
     $error = $e->getMessage();
 }
 
-// Владелец нового лицевого счёта — плательщик, если похоже на ФИО
-function owner_name(string $payer): string
-{
-    $name = payer_parts($payer)['name'];
-    if (preg_match('/^[А-ЯЁа-яё-]+(\s+[А-ЯЁа-яё.-]+){1,3}$/u', $name)) {
-        return mb_convert_case(mb_strtolower($name), MB_CASE_TITLE);
-    }
-    return 'Не указан';
-}
-
 // ---------- 2. предварительный просмотр ----------
 $bank = ($_GET['step'] ?? '') === 'preview' ? ($_SESSION['bank'] ?? null) : null;
 $rows = [];
-$stat = ['ok' => 0, 'new' => 0, 'none' => 0, 'dup' => 0];
+$stat = ['ok' => 0, 'new' => 0, 'none' => 0, 'dup' => 0, 'held' => 0];
 if ($bank) {
     $pdo = db();
     $accByFlat = $pdo->query('SELECT flat, owner FROM accounts')->fetchAll(PDO::FETCH_KEY_PAIR);
     $known = array_flip($pdo->query('SELECT bank_ref FROM payments WHERE bank_ref IS NOT NULL')->fetchAll(PDO::FETCH_COLUMN));
+    $pending = array_flip($pdo->query('SELECT bank_ref FROM bank_pending')->fetchAll(PDO::FETCH_COLUMN));
     // по каким квартирам плательщик платил раньше (в базе) — если квартира одна, используем её
     $history = [];
     foreach ($pdo->query('SELECT p.payer, a.flat FROM payments p JOIN accounts a ON a.id = p.account_id
@@ -180,8 +153,13 @@ if ($bank) {
             $r['flat'] = $history[$key][0];
             $r['why'] = 'по ранее загруженным платежам';
         }
-        $r['status'] = isset($known[$r['op']['ref']]) ? 'dup'
-                     : (!$r['flat'] ? 'none' : (isset($accByFlat[$r['flat']]) ? 'ok' : 'new'));
+        $r['status'] = match (true) {
+            isset($known[$r['op']['ref']])   => 'dup',
+            isset($pending[$r['op']['ref']]) => 'held',
+            !$r['flat']                      => 'none',
+            isset($accByFlat[$r['flat']])    => 'ok',
+            default                          => 'new',
+        };
         $r['owner'] = $r['flat'] ? ($accByFlat[$r['flat']] ?? null) : null;
         $stat[$r['status']]++;
     }
@@ -189,13 +167,15 @@ if ($bank) {
     $out = array_filter($bank['ops'], fn($o) => $o['direction'] === 'out');
 }
 
-$imports = db()->query('SELECT * FROM bank_imports ORDER BY id DESC')->fetchAll();
+$imports = db()->query("SELECT i.*, (SELECT COUNT(*) FROM bank_pending p WHERE p.import_id = i.id AND p.status = 'new') AS held
+                        FROM bank_imports i ORDER BY i.id DESC")->fetchAll();
 
 $statusText = [
     'ok'   => ['готов к загрузке', 'ok'],
     'new'  => ['новый лицевой счёт', 'warn'],
     'none' => ['квартира не определена', 'debt'],
     'dup'  => ['уже загружен', 'muted'],
+    'held' => ['уже в неразнесённых', 'muted'],
 ];
 
 layout_start('Импорт банковской выписки', 'import.php');
@@ -215,7 +195,8 @@ layout_start('Импорт банковской выписки', 'import.php');
         <p class="muted">Из выписки берутся только поступления на расчётный счёт. Квартира определяется
             по назначению платежа («л/с 164», «кв. 12», «Осенний б-р 12-2-24», «ЛСЧ 0000000111») или
             по адресу плательщика. Перед загрузкой можно проверить и поправить номер квартиры.
-            Повторная загрузка той же выписки не создаёт дублей.</p>
+            Повторная загрузка той же выписки не создаёт дублей.
+            Поступления, которые не удалось отнести к квартире, сохраняются в «Неразнесённых платежах».</p>
     </form>
 <?php else: ?>
     <div class="grid">
@@ -235,10 +216,15 @@ layout_start('Импорт банковской выписки', 'import.php');
                 <button type="button" class="btn light" data-f="new">новые счета (<?= $stat['new'] ?>)</button>
                 <button type="button" class="btn light" data-f="none">без квартиры (<?= $stat['none'] ?>)</button>
                 <button type="button" class="btn light" data-f="dup">уже загружены (<?= $stat['dup'] ?>)</button>
+                <?php if ($stat['held']): ?>
+                <button type="button" class="btn light" data-f="held">в неразнесённых (<?= $stat['held'] ?>)</button>
+                <?php endif ?>
             </div>
         </div>
         <p class="muted">Расчётный счёт <?= h($bank['account']) ?>. Списаний со счёта (комиссии банка,
-            оплата подрядчикам): <?= count($out) ?> на сумму <?= money(array_sum(array_column($out, 'amount'))) ?> — не загружаются.</p>
+            оплата подрядчикам): <?= count($out) ?> на сумму <?= money(array_sum(array_column($out, 'amount'))) ?> — не загружаются.
+            Поступления, которые не будут загружены (без квартиры или без галочки), сохранятся
+            в <a class="link" href="pending.php">неразнесённых платежах</a> — их можно доработать позже.</p>
 
         <div class="table-wrap">
         <table class="import">
@@ -250,7 +236,7 @@ layout_start('Импорт банковской выписки', 'import.php');
             <?php foreach ($rows as $i => $r): $op = $r['op']; [$st, $cls] = $statusText[$r['status']]; ?>
             <tr data-s="<?= $r['status'] ?>">
                 <td><input type="checkbox" name="sel[<?= $i ?>]" <?= in_array($r['status'], ['ok', 'new']) ? 'checked' : '' ?>
-                           <?= $r['status'] === 'dup' ? 'disabled' : '' ?>></td>
+                           <?= in_array($r['status'], ['dup', 'held']) ? 'disabled' : '' ?>></td>
                 <td class="nowrap"><?= date('d.m.Y H:i', strtotime($op['posted'])) ?></td>
                 <td><?= h($op['doc_no']) ?></td>
                 <td><?= h($r['name']) ?></td>
@@ -258,7 +244,7 @@ layout_start('Импорт банковской выписки', 'import.php');
                 <td class="purpose"><?= h(preg_replace('/^.*Назначение платежа:\s*/iu', '', $op['purpose'])) ?></td>
                 <td>
                     <input type="number" name="flat[<?= $i ?>]" value="<?= $r['flat'] ?: '' ?>" min="1" class="flat"
-                           <?= $r['status'] === 'dup' ? 'disabled' : '' ?>>
+                           <?= in_array($r['status'], ['dup', 'held']) ? 'disabled' : '' ?>>
                     <?php if ($r['why']): ?><div class="muted small"><?= h($r['why']) ?></div><?php endif ?>
                 </td>
                 <td class="<?= $cls ?> small">
@@ -290,19 +276,20 @@ layout_start('Импорт банковской выписки', 'import.php');
         <div class="table-wrap">
         <table>
             <tr><th>№</th><th>Файл</th><th>Расчётный счёт</th><th>Период операций</th><th>Загружена</th>
-                <th class="num">Операций</th><th class="num">Платежей</th><th class="num">Сумма</th><th></th></tr>
+                <th class="num">Операций</th><th class="num">Платежей</th><th class="num">Сумма</th><th class="num">Неразнесено</th><th></th></tr>
             <?php foreach ($imports as $im): ?>
             <tr>
                 <td class="muted"><?= (int)$im['id'] ?></td>
-                <td><?= h($im['file_name']) ?></td>
+                <td title="<?= h($im['file_name']) ?>"><?= h(mb_strimwidth($im['file_name'], 0, 42, '…')) ?></td>
                 <td><?= h($im['bank_account']) ?></td>
                 <td class="nowrap"><?= date('d.m.Y', strtotime($im['date_from'])) ?> – <?= date('d.m.Y', strtotime($im['date_to'])) ?></td>
                 <td class="nowrap"><?= date('d.m.Y H:i', strtotime($im['imported_at'])) ?></td>
                 <td class="num"><?= (int)$im['ops_total'] ?></td>
                 <td class="num"><a class="link" href="edit.php?t=payments&import=<?= (int)$im['id'] ?>"><?= (int)$im['ops_loaded'] ?></a></td>
                 <td class="num"><?= money($im['amount']) ?></td>
+                <td class="num"><?php if ($im['held']): ?><a class="link" href="pending.php?import=<?= (int)$im['id'] ?>"><?= (int)$im['held'] ?></a><?php else: ?>0<?php endif ?></td>
                 <td class="num">
-                    <form method="post" onsubmit="return confirm('Удалить все платежи этой загрузки?')">
+                    <form method="post" onsubmit="return confirm('Удалить все платежи и неразнесённые записи этой загрузки?')">
                         <input type="hidden" name="action" value="undo">
                         <input type="hidden" name="id" value="<?= (int)$im['id'] ?>">
                         <button class="link" type="submit">отменить загрузку</button>

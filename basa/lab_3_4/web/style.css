@@ -84,3 +84,10 @@ table.import tr[data-s=dup] td { opacity: .55; }
 .filters .btn { padding: 4px 10px; font-size: 13px; }
 .filters .btn.on { background: var(--accent); color: #fff; }
 .stat span { overflow-wrap: anywhere; }
+
+/* Неразнесённые платежи */
+.default-submit { position: absolute; left: -9999px; width: 1px; height: 1px; }
+table.pending tr.ignored td { opacity: .6; }
+table.pending .hint { font: inherit; font-size: 12px; background: none; color: var(--accent);
+    border: 1px dashed var(--border); border-radius: 6px; padding: 1px 6px; margin: 3px 3px 0 0; cursor: pointer; }
+table.pending button.go { color: var(--accent); font-weight: 600; }
