@@ -280,7 +280,7 @@ layout_start('Импорт банковской выписки', 'import.php');
             <?php foreach ($imports as $im): ?>
             <tr>
                 <td class="muted"><?= (int)$im['id'] ?></td>
-                <td title="<?= h($im['file_name']) ?>"><?= h(mb_strimwidth($im['file_name'], 0, 42, '…')) ?></td>
+                <td title="<?= h($im['file_name']) ?>"><?= h(mb_strimwidth($im['file_name'], 0, 28, '…')) ?></td>
                 <td><?= h($im['bank_account']) ?></td>
                 <td class="nowrap"><?= date('d.m.Y', strtotime($im['date_from'])) ?> – <?= date('d.m.Y', strtotime($im['date_to'])) ?></td>
                 <td class="nowrap"><?= date('d.m.Y H:i', strtotime($im['imported_at'])) ?></td>
