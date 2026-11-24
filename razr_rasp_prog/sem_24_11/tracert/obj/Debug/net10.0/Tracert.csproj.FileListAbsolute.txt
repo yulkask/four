@@ -1,0 +1,15 @@
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/bin/Debug/net10.0/tracert
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/bin/Debug/net10.0/tracert.deps.json
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/bin/Debug/net10.0/tracert.runtimeconfig.json
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/bin/Debug/net10.0/tracert.dll
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/bin/Debug/net10.0/tracert.pdb
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/Tracert.GeneratedMSBuildEditorConfig.editorconfig
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/Tracert.AssemblyInfoInputs.cache
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/Tracert.AssemblyInfo.cs
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/Tracert.csproj.CoreCompileInputs.cache
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/Tracert.sourcelink.json
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/tracert.dll
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/refint/tracert.dll
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/tracert.pdb
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/Tracert.genruntimeconfig.cache
+/Users/yulia/Desktop/four/razr_rasp_prog/sem_24_11/tracert/obj/Debug/net10.0/ref/tracert.dll
