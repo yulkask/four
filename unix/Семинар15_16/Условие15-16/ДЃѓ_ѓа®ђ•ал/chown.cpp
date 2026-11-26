@@ -1,3 +1,14 @@
+/*
+ * Учебный аналог chown.
+ * Три аргумента:  программа пользователь файл
+ *   владелец и группа файла становятся uid и основной группой этого пользователя.
+ * Четыре аргумента: программа группа пользователь файл
+ *   (порядок группы и пользователя здесь обратный привычному chown user:group).
+ * Имена переводятся в числовые id через getpwnam и getgrnam.
+ * chown меняет владельца по пути; для ссылки понадобился бы lchown.
+ * Заголовок sys/sysinfo.h к смене владельца не относится и на macOS отсутствует.
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include <sys/sysinfo.h>
@@ -33,6 +44,7 @@ int main(int argc, char * argv[])
     }
     else if (argc == 4)//command , user, group,file(folder)
     {
+	/* Фактически argv[1] — группа, argv[2] — пользователь, argv[3] — файл. */
 	userinfo = getpwnam(argv[2]);
 	grinfo = getgrnam(argv[1]);
 	if ((userinfo != NULL) && (grinfo != NULL))
@@ -59,4 +71,3 @@ int main(int argc, char * argv[])
     }
     return 0;
 }
-

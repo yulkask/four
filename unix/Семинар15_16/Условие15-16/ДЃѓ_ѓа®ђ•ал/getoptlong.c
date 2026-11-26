@@ -1,3 +1,13 @@
+/*
+ * Тот же разбор, плюс длинные опции getopt_long.
+ * Короткие по-прежнему задаёт строка "abc:d:012".
+ * Длинные описаны таблицей struct option:
+ *   имя, has_arg (0 — нет, 1 — обязательный), flag, val.
+ * Если flag == 0, getopt_long возвращает val.
+ * val == 0 попадает в case 0, и имя берут из long_options[option_index].
+ * "--create" возвращает 'c', поэтому обрабатывается вместе с коротким -c.
+ */
+
 #include <stdio.h>     /* for printf */
 #include <stdlib.h>    /* for exit */
 #include <getopt.h>    /* for getopt_long; POSIX standard getopt is in unistd.h */
@@ -13,7 +23,7 @@ int main (int argc, char **argv) {
         {"verbose", 0, 0, 0},
         {"create", 1, 0, 'c'},
         {"file", 1, 0, 0},
-        {NULL, 0, NULL, 0}
+        {NULL, 0, NULL, 0}          /* конец таблицы */
     };
     int option_index = 0;
     while ((c = getopt_long(argc, argv, "abc:d:012",
@@ -62,5 +72,9 @@ int main (int argc, char **argv) {
             printf ("%s ", argv[optind++]);
         printf ("\n");
     }
+    (void)aopt;
+    (void)bopt;
+    (void)copt;
+    (void)dopt;
     exit (0);
 }
